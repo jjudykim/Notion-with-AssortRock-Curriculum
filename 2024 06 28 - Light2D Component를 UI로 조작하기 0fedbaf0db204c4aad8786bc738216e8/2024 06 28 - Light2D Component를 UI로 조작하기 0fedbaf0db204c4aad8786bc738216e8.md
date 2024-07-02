@@ -1,8 +1,9 @@
 # 2024/06/28 - Light2D Component를 UI로 조작하기
 
-태그: C++, DirectX11, 과제수행필요, 그래픽스, 중급
+태그: C++, DirectX11, 게임수학, 그래픽스, 중급
+날짜: 2024/06/28
 상위 항목: Week31 (https://www.notion.so/Week31-e62530ed86dd4b30a456fab03e5bfd81?pvs=21)
-상태: 메모
+상태: 완료
 주차: 0100_Week30~39
 
 > 0교시 (보강) 녹음본
@@ -281,17 +282,11 @@ void Light2DUI::Update()
 }
 ```
 
-### 광원의 정보를 쉐이더에게 전달하기 ( +Global Data)
+### 광원의 정보를 쉐이더에게 전달하기 (With Global Data)
 
-광원 오브젝트가 존재할 경우에, 쉐이더 쪽에서 영향을 받아 연산이 이루어지도록 해야한다
+쉐이더 쪽에서 자주 필요로 하는 몇몇 데이터들이 있는데,  쉐이더에서 특별히 분류하기 힘든 데이터들을 모아서, 새로운 Global Data 전용 상수 버퍼를 제작해 바인딩받을 수 있도록 하자
 
-그러기 위해서는, 광원의 정보들과 + 몇 개의 광원이 존재하는 지 
-
-몇 개짜리 광원이 와있는지 알 수 있어야 한다? 
-
-상수버퍼를 하나 더 추가 → Global Data
-
-: 자주 쓰이는 데이터, 쉐이더에서 분류하기 힘든 데이터들
+**Global Data 전용 상수 버퍼 작성**
 
 ```cpp
 cbuffer GLOBAL_DATA : register(b3)
@@ -308,6 +303,13 @@ cbuffer GLOBAL_DATA : register(b3)
 	int          g_Light3DCount;     // 3D 광원의 개수
 }
 ```
+
+- 여기서 Global Data로 광원의 개수가 존재하는 이유?
+    
+    → 현재 광원이 몇 개가 존재하는지에 대해서는, 우리가 전달한 구조화 버퍼만으로는 알 수 없다!
+    
+    Light2D의 정보를 담은 Structured Buffer의 개수를 알기 위해서, 광원의 개수 역시 포함해줬다
+    
 
 이와 연결할 상수 버퍼 연동 구조체 역시, Engine쪽에서 작성해주자
 
@@ -327,34 +329,17 @@ struct tGlobalData
 	int   g_Light2DCount;
 	int   g_Light3DCount;
 };
-extern tGlobalData g_GlobalData;
+extern tGlobalData g_GlobalData;                          // 전역 변수 선언
 ```
+
+선언한 `g_GlobalData`에 대한 구현 역시 extern에서 작성해줬다
+
+→ 멤버들은 각각 적절한 위치에서 설정해주기!
 
 ```cpp
 tGlobalData g_GlobalData = {};
 // ...
 ```
-
-또 Device에서 상수 버퍼 생성 시점에서, Global Data 버퍼 역시 생성해주기!
-
-```cpp
-int CDevice::CreateConstBuffer()
-{
-	// ...
-	
-	pCB = new CConstBuffer;
-	if (FAILED(pCB->Create(CB_TYPE::GLOBAL, sizeof(tGlobalData))))
-	{
-		MessageBox(nullptr, L"상수버퍼 생성 실패", L"초기화 실패", MB_OK);
-		return E_FAIL;
-	}
-	m_arrCB[(UINT)CB_TYPE::GLOBAL] = pCB;
-	
-	return S_OK;
-}
-```
-
-쉐이더에게 바인딩하기 전에, Global Data에 담긴 정보들을 갱신해주는 작업도 이루어져야 할 것이다
 
 **시간 관련 정보 갱신**
 
@@ -383,6 +368,25 @@ void CRenderMgr::RenderStart()
 
 ```
 
+또 Device에서 상수 버퍼들을 생성하는 시점에서, Global Data 버퍼 역시 생성해주자!
+
+```cpp
+int CDevice::CreateConstBuffer()
+{
+	// ...
+	
+	pCB = new CConstBuffer;
+	if (FAILED(pCB->Create(CB_TYPE::GLOBAL, sizeof(tGlobalData))))
+	{
+		MessageBox(nullptr, L"상수버퍼 생성 실패", L"초기화 실패", MB_OK);
+		return E_FAIL;
+	}
+	m_arrCB[(UINT)CB_TYPE::GLOBAL] = pCB;
+	
+	return S_OK;
+}
+```
+
 그리고 Render Manager의 RenderStart 함수를 통해,
 
 마지막에 Global data 상수 버퍼를 바인딩해주는 작업까지 마무리해주자
@@ -398,45 +402,73 @@ void CRenderMgr::RenderStart()
 }
 ```
 
+<aside>
+🗒️ [수정 사항]
+
+Render Target을 Clear해주는 함수였던 Device의 Clear 함수를, 
+Render Manager에서 일괄적으로 Render 관련된 작업들을 컨트롤하기 위해서 해당 작업을 Render Start로 옮겨줄 것이다
+
+```cpp
+void CRenderMgr::RenderStart()
+{
+	// ...
+	// TargetClear
+	float color[4] = { 0.f, 0.f, 0.f, 1.f };
+	CONTEXT->ClearRenderTargetView(pRTTex->GetRTV().Get(), color);
+	CONTEXT->ClearDepthStencilView(pDSTex->GetDSV().Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.f, 0);
+	
+	// ...
+}
+
+```
+
+</aside>
+
 ### 쉐이더를 통해 물체들이 Light2D에 영향을 받을 수 있도록 해보자
 
 이제 광원의 유무가 쉐이더에 영향을 끼칠 수 있도록 쉐이더 코드를 수정해주자
 
+아직까지 광원의 개수까지는 신경쓰지 말고, 당장은 우리가 광원 하나만 신경써보자!
+
+→ `g_Light2D[0]` 으로 사용 (우리가 광원 오브젝트 1개는 생성해놨으니!)
+
 ```cpp
-// 광원 적용
-
-if (g_Light2D[0].Type == 0)                                    // DirectionalLight인 경우
+float4 PS_Std2D(VTX_OUT _in) : SV_Target
 {
-	vColor.rgb = g_Light2D[0].light.Color.rgb * vColor.rgb       // 원광
-	           + g_Light2D[0].light.Ambient.rgb * vColor.rgb;    // 환경광(ambient)
-}
-else if (g_Light2D[0].Type == 1)                               //
-{
-	// 광원의 위치 / 광원의 반경을 통해 광원에게 영향을 받는 픽셀에 대해 알아야 한다
-	// 각각의 픽셀들이 본인의 World상에서의 위치를 광원의 위치와 비교해 반경에 들어있는지를 확인!
-	// 단, 2D상에서는 x,y좌표만을 고려해 계산해야 한다 
-	// (깊이를 표현하기 위해 z를 활용하지만, 광원 효과는 그대로 받아야 하기 때문에)
-	
-	// 점광원과 픽셀까지의 거리
-	float fDist = distance(g_Light2D[0].WorldPos, _in.vWorldPos);
-	
-	// 빛의 세기를 연산하는 두 가지 방법
-	// 1) 광원으로부터 떨어진 거리에 비례하는 빛의 세기
-	float fPow1 = saturate(1.f - fDist / g_Ligth2D[0].Radius);     
-	
-	// 2) 중심점이 더 밝고, 반경 경계로 갈수록 급속하게 약해지는 빛의 세기
-	float fPow2 = 
-	
-	// 최종 색상 계산
-	
-}
+	// ...
+	// 광원 적용
 
-g_Light2DCount;
-g_Light2D[0].light.Ambient;
-g_Light2D[0].Type;
-g_Light2D[0].
-
-return vColor;
+	// Light Type이 0, 즉 Directional Light인 경우
+	if (g_Light2D[0].Type == 0)                                   
+	{
+		vColor.rgb = g_Light2D[0].light.Color.rgb * vColor.rgb       // 원광
+		           + g_Light2D[0].light.Ambient.rgb * vColor.rgb;    // 환경광(ambient)
+	}
+	// Light Type이 1, Point Light인 경우
+	else if (g_Light2D[0].Type == 1)
+	{
+		// 광원의 위치 / 광원의 반경을 통해 광원에게 영향을 받는 픽셀에 대해 알아야 한다
+		// 각각의 픽셀들이 본인의 World상에서의 위치를 광원의 위치와 비교해 
+		// 본인이 반경에 들어있는지를 확인! -> 반경에 들어있는 경우에만 광원 효과를 내야 한다
+		// 단, 2D상에서는 x,y좌표만을 고려해 계산해야 한다 
+		// (깊이를 표현하기 위해 z를 활용하지만, 광원 효과는 그대로 받아야 하기 때문에)
+		
+		// 점광원과 픽셀까지의 거리
+		float fDist = distance(g_Light2D[0].WorldPos, _in.vWorldPos);
+		
+		// 빛의 세기를 연산하는 두 가지 방법
+		// 1) 광원으로부터 떨어진 거리에 비례하는 빛의 세기 (거리값에 따른 비율로 치환)
+		float fPow1 = saturate(1.f - fDist / g_Ligth2D[0].Radius);     
+		
+		// 2) 중심점이 더 밝고, 반경 경계로 갈수록 급속하게 약해지는 빛의 세기
+		float fPow2 = saturate(cos(saturate(fDist / g_Light2D[0].Radius) * (PI / 2.f))));
+		
+		// 최종 색상 계산 = 빛의 색 * 거리에 따른 광원의 세기
+		vColor.rgb = vColor.rgb * g_Light2D[0].light.Color.rgb * fPow2;    // (2번 연산 채택)
+	}
+	
+	return vColor;
+}
 ```
 
 - HLSL에서는 두 점 사이의 거리를 구해주는 함수가 정의되어 있다 → `distance`
@@ -446,27 +478,37 @@ return vColor;
     
     따라서 거리에 따른 빛의 세기를 계산해줘야 한다 → `fPow`
     
-- 여기서 조금 더 디테일을 추가하자면, 현재는 거리에 따른 빛의 세기의 감소가 일정하다
+- `saturate` (0-1 사이의 값으로 치환하는 함수) 를 사용한 이유?
     
-    그러나 더 현실적이게 보이기 위해선, 일정치 거리의 수준까지는 빛의 세기가 유지되다가 영향 반경의 근처에 갈 경우 급격하게 어두워지도록 설정하는 것이 자연스럽다!
+    : 빛의 세기라는 것이 음수로 갈 수는 없으니, 연산결과가 0과 1 사이의 비율로 나타날 수 있도록 제약!
+    
+- 여기서 조금 더 디테일을 추가하자면, 현재는 거리에 따른 빛의 세기의 감소가 일정하다 (1번 연산)
+    
+    그러나 더 현실적이게 보이기 위해선, 일정치 거리의 수준까지는 빛의 세기가 유지되다가 영향 반경의 근처에 갈 경우 급격하게 어두워지도록 설정하는 것이 자연스럽다! (2번 연산)
     
     둘을 그래프로 그려보자면 대강 이런 모양
     
-    → 표 추가
+    ![Untitled](2024%2006%2028%20-%20Light2D%20Component%E1%84%85%E1%85%B3%E1%86%AF%20UI%E1%84%85%E1%85%A9%20%E1%84%8C%E1%85%A9%E1%84%8C%E1%85%A1%E1%86%A8%E1%84%92%E1%85%A1%E1%84%80%E1%85%B5%200fedbaf0db204c4aad8786bc738216e8/Untitled.png)
     
-    그래프를 보면, 우리가 만드려는 광원 효과가 cos 그래프와 유사하므로 이를 활용해 연산해주겠다!
+    ![Untitled](2024%2006%2028%20-%20Light2D%20Component%E1%84%85%E1%85%B3%E1%86%AF%20UI%E1%84%85%E1%85%A9%20%E1%84%8C%E1%85%A9%E1%84%8C%E1%85%A1%E1%86%A8%E1%84%92%E1%85%A1%E1%84%80%E1%85%B5%200fedbaf0db204c4aad8786bc738216e8/c32164d1-f4a7-4a1b-a398-cf167f5d84a0.png)
     
-    →  `fPow = saturate(cost((fDist / g_Light2D[0].Radius) *  (PI / 2.f)));`
+    그래프를 보면, 우리가 만드려는 광원 효과가  cos 그래프와 유사하므로 이를 활용해 연산해주겠다!
+    
+    →  `fPow = saturate(cost((fDist / g_Light2D[0].Radius) *  (PI / 2.f)));` (2번 연산)
     
     즉, 둘 사이의 거리를 각도로 치환해서 거리에 따른 빛의 세기를 cos 그래프 형태로 사용하는 것
     
     이렇게 빛의 세기를 통해 원하는 연출을 선택해 표현할 수 있다~!
     
 
-이렇게 작성한 코드를 다른 Material이나 Shader에 적용할 수 있어야 하므로, 간편화하게 위해서 함수로 제작해주자
+이렇게 작성한 코드를 다른 Material이나 Shader에 적용할 수 있어야 하므로, 
+
+간편하게 사용하기 위해서 함수로 제작해주자
+
+**광원을 연산하는 함수 CalculateLight2D 제작**
 
 ```cpp
-// 인자 : 적용할 광원의 Index, 광원을 적용받을 나의 위치, (&)광원 세기의 합 (색 제외)
+// 인자 : 적용할 광원의 Index, 광원을 적용받을 Pixel의 위치, (&)광원 세기의 합 (색 제외)
 void CalculateLight2D(int _LightIdx, float3 _WorldPos, inout tLight _Light)
 {
 	// 현재 사용할 광원
@@ -478,39 +520,53 @@ void CalculateLight2D(int _LightIdx, float3 _WorldPos, inout tLight _Light)
 		_Light.Ambient = Info.light.Ambient;
 	}
 	else if (g_Light2D[0].Type == 1)
-	{
-	// 광원의 위치 / 광원의 반경을 통해 광원에게 영향을 받는 픽셀에 대해 알아야 한다
-	// 각각의 픽셀들이 본인의 World상에서의 위치를 광원의 위치와 비교해 반경에 들어있는지를 확인!
-	// 단, 2D상에서는 x,y좌표만을 고려해 계산해야 한다 
-	// (깊이를 표현하기 위해 z를 활용하지만, 광원 효과는 그대로 받아야 하기 때문에)
+	{	
+		float fDist = distance(g_Light2D[0].WorldPos, _in.vWorldPos);
 	
-	// 점광원과 픽셀까지의 거리
-	float fDist = distance(g_Light2D[0].WorldPos, _in.vWorldPos);
+		// 1) 광원 세기 연산 1 (거리 비례)
+		float fPow1 = saturate(1.f - fDist / g_Ligth2D[0].Radius);
 	
-	// 빛의 세기를 연산하는 두 가지 방법
-	// 1) 광원으로부터 떨어진 거리에 비례하는 빛의 세기
-	float fPow1 = saturate(1.f - fDist / g_Ligth2D[0].Radius);     
+		// 2) 광원 세기 연산 2 (중심점 위주)
+		float fPow2 = saturate(cos(saturate(fDist / g_Light2D[0].Radius) * (PI / 2.f))));
 	
-	// 2) 중심점이 더 밝고, 반경 경계로 갈수록 급속하게 약해지는 빛의 세기
-	float fPow2 = 
-	
-	// 최종 색상 계산
-	_Light.Color = Info.light.Color.rgb * fPow;
-	_Light.Ambient = Info.light.Ambient.rgb;
-}
-
-g_Light2DCount;
-g_Light2D[0].light.Ambient;
-g_Light2D[0].Type;
-g_Light2D[0].
-
-return vColor;
+		// 최종 색상 계산
+		_Light.Color = Info.light.Color.rgb * fPow2;
+		_Light.Ambient = Info.light.Ambient.rgb;
 }
 ```
 
-나에게 적용되어야 할 광원만 전달한 후에, 적용되는 빛을 연산한 후
+- 인자인 `_Light` 를 **inout**으로 설정한 이유!
+    
+    : 읽고 쓰기가 모두 가능한 인자여야 하기 때문에 
+    
+    (즉, C++로 따지면 참조(`&`)를 통해 원본 값을 변경해야 하는 것과 동일하다)
+    
+- 현재 index의 광원을 연산할 때마다, 나(픽셀)에게 현재 적용되어야 할 광원을 전달받은 후*(입력, in)*에 광원의 세기에 따른 Color 및 Ambient를 연산한 후, 이를 다시 인자로 받은 _Light 변수에 결과값을 적용*(출력, out)*하게 된다
+    
+    → 즉, 각 픽셀마다 광원의 영향을 순차적으로 받게끔 해준 것이다
+    
 
-색상을 적용해서 각 픽셀마다 광원의 영향을 받게끔 해줬다
+그럼 Shader에서는, 해당 함수를 활용해서 간편하게 현재 적용되는 광원들을 연산할 수 있게 된다
+
+```cpp
+float4 PS_Std2D(VTX_OUT _in) : SV_Target
+{ 
+	// ...
+	// 광원 적용      
+  tLight Light = (tLight) 0.f;
+    
+  for (int i = 0; i < g_Light2DCount; ++i)
+  {
+	  CalculateLight2D(i, _in.vWorldPos, Light);
+  }
+  
+  // 최종 색상 계산
+  vColor.rgb = vColor.rgb * Light.Color.rgb
+					   + vColor.rgb * Light.Ambient.rgb;
+	
+	return vColor;
+}
+```
 
 - 적용되는 빛과 색상 정보를 분리하고 연산한 이유?
     
@@ -518,7 +574,7 @@ return vColor;
     
     : 각 광원들이 주는 빛(세기)을 모두 합친 후에 Object에 영향을 미치게끔 해야 한다
     
-    빛을 중첩해서 영향을 받는 경우, 받는 빛의 색상을 연산하며 중첩된다면 우리가 원하는 결과와 다르게 빛이 적용될 수 있다
+    빛을 중첩해서 영향을 받는 경우, 받는 빛에 따른 색상을 연산하며 중첩하게 된다면 우리가 원하는 결과와 다르게 빛이 적용될 수 있다
     
 
 <aside>
@@ -526,17 +582,25 @@ return vColor;
 
 Spotlight 광원 구현해보기
 
-</aside>
-
-<aside>
-🗒️ [수정 사항]
-
-Render Target을 Clear해주는 함수였던 Device의 Clear 함수를, 
-Render Manager에서 일괄적으로 Render 관련된 작업들을 컨트롤하기 위해서 같은 작업을 옮겨줄 것이다
-
 ```cpp
-float color[4] = { 0.f, 0.f, 0.f, 1.f };
-CONTEXT->ClearRenderTargetView
+// SpotLight 인 경우
+else
+{
+    float fDist = distance(Info.WorldPos.xy, _WorldPos.xy);
+    
+    // 광원의 방향 벡터 정규화
+    float2 lightDir = normalize(_WorldPos.xy - Info.WorldPos.xy);        
+		
+		// 두 벡터 간의 내적
+    float fAngleToCos = dot(lightDir.xy, Info.WorldDir.xy);              
+
+    if (fAngleToCos > cos(Info.Angle / 2.f))
+    {
+        float fPow = saturate(cos(saturate(fDist / Info.Radius) * (PI / 2.f)));
+        _Light.Color.rgb += Info.light.Color.rgb * fPow;
+        _Light.Ambient.rgb += Info.light.Ambient.rgb;
+    }
+}    
 ```
 
 </aside>
@@ -544,5 +608,34 @@ CONTEXT->ClearRenderTargetView
 광원 전용 오브젝트를 두 개 제작해서, 서로 영향을 미치게끔 해보자
 
 ```cpp
-pObject->
+void CLevelMgr::Init()
+{
+	// ...
+	// 광원 오브젝트 추가
+	pObject = new CGameObject;
+	pObject->SetName(L"PointLight 1");
+	pObject->AddComponent(new CTransform);	
+	pObject->AddComponent(new CLight2D);
+
+	pObject->Light2D()->SetLightType(LIGHT_TYPE::POINT);
+	pObject->Light2D()->SetLightColor(Vec3(1.f, 1.f, 1.f));
+	pObject->Light2D()->SetRadius(500.f);
+	pObject->Transform()->SetRelativePos(Vec3(-300.f, 0.f, 100.f));
+	
+	m_CurLevel->AddObject(0, pObject);
+
+	pObject = new CGameObject;
+	pObject->SetName(L"PointLight 2");
+	pObject->AddComponent(new CTransform);
+	pObject->AddComponent(new CLight2D);
+
+	pObject->Light2D()->SetLightType(LIGHT_TYPE::POINT);
+	pObject->Light2D()->SetLightColor(Vec3(0.2f, 0.2f, 0.8f));
+	pObject->Light2D()->SetRadius(500.f);
+	pObject->Transform()->SetRelativePos(Vec3(300.f, 0.f, 100.f));
+
+	m_CurLevel->AddObject(0, pObject);
+	
+	// ...
+}
 ```
