@@ -1,4 +1,4 @@
-# 2024/07/11 -
+# 2024/07/11 - Post Process의 부분 적용 / Script 분리를 위한 프로젝트 생성
 
 상위 항목: Week33 (https://www.notion.so/Week33-c25c856dcd954fe0af5f24db92f6af83?pvs=21)
 상태: 메모
@@ -26,10 +26,21 @@ Object로서 존재하면서, 자신이 렌더링될 때에만 해당 효과가 
 ```cpp
 // PostProcess Object
 CGameObject* pPostProcessObj = new CGameObject;
+pPostProcessObj->SetName(L"GrayFilter");
+pPostProcessObj->AddComponent(new CTransform);
+pPostProcessObj->AddComponent(new CMeshRender);
 
+pPostProcessObj->Transform()->SetRelativeScale(150.f, 150.f, 1.f);
+
+pPostProcessObj->MeshRender()->SetMesh(CAssetMgr::GetInst()->FindAsset<CMesh>(L"RectMesh"));
+pPostProcessObj->MeshRender()->SetMaterial(CAssetMgr::GetInst()->FindAsset<CMaterial>(L"DistortionMtrl"));
+
+m_CurLevel->AddObject(0, pPostProcessObj);
 ```
 
-새로운 Dirstortion 전용 Shader를 한번 작성해보자
+- Set된 Material → 새로운 Shader / Material을 사용해 적용할 것이라, 새로운 이름인 “DirstortionMtrl”을 가져와줭ㅆ다!
+
+**새로운 Dirstortion 전용 Shader를 한번 작성해보자**
 
 ```cpp
 // ===========================
@@ -45,9 +56,9 @@ CGameObject* pPostProcessObj = new CGameObject;
 
 VS_OUT VS_Distortion(VS_IN _in)
 {
-	VS_OUT output = (VS_OUt) 0.f;
+	VS_OUT output = (VS_out) 0.f;
 	
-	output.vPosition = mul(float4(_in.vPos, 1.f), matWVP);
+	output.vPosition = mul(float4(_in.vPos, 1.f), matWVP);    // W, V, P 모두 적용된 행렬로 계산
 	output.vUV = _in.vUV;
 	
 	return output;
